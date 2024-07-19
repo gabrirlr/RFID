@@ -25,6 +25,12 @@ OperationMode currentMode = VERIFICATION_MODE;  // Modo inicial: Verificação
 bool lastButtonState = LOW;   // Estado do botão na última verificação
 volatile bool accessGranted = false; // Flag para sinalizar acesso concedido
 
+#define BUTTON_PRESS_TIME_FOR_MODE_CHANGE 5000  // 5 segundos
+#define BUTTON_PRESS_TIME_FOR_MEMORY_CLEAR 10000 // 10 segundos
+
+unsigned long buttonPressStartTime = 0;
+bool buttonWasPressed = false;
+
 void setup() {
   Serial.begin(9600);
 
@@ -76,13 +82,46 @@ void attachInterrupts() {
 
 void checkModeSwitch() {
   bool buttonState = digitalRead(MODE_SWITCH_PIN);
-  if (buttonState != lastButtonState) {
-    delay(50); // Debounce
-    buttonState = digitalRead(MODE_SWITCH_PIN);
-    if (buttonState != lastButtonState) {
-      toggleMode();
-      lastButtonState = buttonState;
+
+  if (buttonState == LOW) { // Botão pressionado
+    if (!buttonWasPressed) { // Botão foi recém pressionado
+      buttonPressStartTime = millis();
+      buttonWasPressed = true;
+    } else {
+      unsigned long pressDuration = millis() - buttonPressStartTime;
+
+      if (pressDuration >= BUTTON_PRESS_TIME_FOR_MEMORY_CLEAR) {
+        // Botão pressionado por mais de 10 segundos
+        clearDatabase();
+        sendBips(4);  // 4 bips
+        buttonWasPressed = false;
+      }
     }
+  } else { // Botão não pressionado
+    if (buttonWasPressed) { // Botão foi solto
+      unsigned long pressDuration = millis() - buttonPressStartTime;
+
+      if (pressDuration >= BUTTON_PRESS_TIME_FOR_MODE_CHANGE && pressDuration < BUTTON_PRESS_TIME_FOR_MEMORY_CLEAR) {
+        // Botão pressionado por mais de 5 segundos e menos de 10 segundos
+        toggleMode();
+        sendBips(3);  // 3 bips
+      } else if (pressDuration < BUTTON_PRESS_TIME_FOR_MODE_CHANGE) {
+        // Botão pressionado por menos de 5 segundos
+        if (currentMode == REGISTRATION_MODE) {
+          toggleMode();  // Volta para o modo de verificação
+        }
+      }
+      buttonWasPressed = false;
+    }
+  }
+}
+
+void sendBips(int count) {
+  for (int i = 0; i < count; i++) {
+    digitalWrite(BUZZER_PIN, LOW);
+    delay(250); // Tempo que o buzzer fica ligado
+    digitalWrite(BUZZER_PIN, HIGH);
+    delay(250); // Tempo que o buzzer fica desligado
   }
 }
 
@@ -202,12 +241,6 @@ void toggleMode() {
   Serial.println(currentMode == VERIFICATION_MODE ? "Modo de verificação ativado." : "Modo de registro ativado.");
 }
 
-void sendPulse(int pin) {
-  digitalWrite(pin, HIGH);
-  delay(500);
-  digitalWrite(pin, LOW);
-}
-
 void clearDatabase() {
   Serial.println("Limpando todos os dados do banco de dados...");
 
@@ -237,3 +270,4 @@ void grantAccess() {
 
   digitalWrite(RFID_LED_PIN, HIGH);
 }
+
